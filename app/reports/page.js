@@ -89,6 +89,7 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  const [translateWarning, setTranslateWarning] = useState('');
 
   useEffect(() => {
     async function load() {
@@ -123,51 +124,57 @@ export default function ReportsPage() {
   })).sort((a, b) => b.avg - a.avg);
 
   async function translateReason(text) {
-    if (!text || !text.trim()) return text || '';
+    if (!text || !text.trim()) return { translated: text || '', failed: false };
     try {
-      const res = await fetch('/api/translate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      const json = await res.json();
-      return json.translated || text;
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=en&dt=t&q=${encodeURIComponent(text)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('translate failed');
+      const data = await res.json();
+      const translated = (data[0] || []).map(chunk => chunk[0]).join('');
+      return { translated: translated || text, failed: !translated };
     } catch {
-      return text;
+      return { translated: text, failed: true };
     }
   }
 
   async function handleDownload() {
     setExporting(true);
+    setTranslateWarning('');
     try {
       if (isDaily) {
+        let failCount = 0;
         const rowsWithTranslatedReasons = await Promise.all(
-          rows.map(async (r) => ({
-            state: r.editions?.states?.name,
-            branch: r.editions?.branch,
-            edition: r.editions?.name,
-            pullout: r.editions?.pullout,
-            schedule: r.schedule_page_time?.slice(0,5),
-            release: r.release_page_time?.slice(0,5),
-            delay_minutes: r.delay_minutes,
-            reason: await translateReason(r.delay_reason),
-            last_page: r.last_page_no,
-          }))
+          rows.map(async (r) => {
+            const { translated, failed } = await translateReason(r.delay_reason);
+            if (failed) failCount++;
+            return {
+              state: r.editions?.states?.name,
+              delay_minutes: r.delay_minutes,
+              branch: r.editions?.branch,
+              edition_pullout: `${r.editions?.name || ''} - ${r.editions?.pullout || 'MAIN'}`,
+              last_page: r.last_page_no,
+              schedule: r.schedule_page_time?.slice(0,5),
+              release: r.release_page_time?.slice(0,5),
+              reason: translated,
+            };
+          })
         );
+        if (failCount > 0) {
+          setTranslateWarning(`Note: ${failCount} reason(s) could not be translated and were kept in the original language.`);
+        }
         await exportStyledExcel({
           filename: `edition-report-daily-${new Date().toISOString().slice(0,10)}.xlsx`,
           sheetName: 'Daily Report',
           delayKey: 'delay_minutes',
           columns: [
             { header: 'State', key: 'state', width: 14 },
+            { header: 'Delay', key: 'delay_minutes', width: 12 },
             { header: 'Branch', key: 'branch', width: 16 },
-            { header: 'Edition', key: 'edition', width: 22 },
-            { header: 'Pullout', key: 'pullout', width: 16 },
+            { header: 'Edition-Pullout', key: 'edition_pullout', width: 28 },
+            { header: 'Last Page', key: 'last_page', width: 12 },
             { header: 'Schedule Time', key: 'schedule', width: 14 },
             { header: 'Release Time', key: 'release', width: 14 },
-            { header: 'Delay (min)', key: 'delay_minutes', width: 14 },
-            { header: 'Reason', key: 'reason', width: 30 },
-            { header: 'Last Page', key: 'last_page', width: 12 },
+            { header: 'Reason', key: 'reason', width: 32 },
           ],
           rows: rowsWithTranslatedReasons,
         });
@@ -218,6 +225,9 @@ export default function ReportsPage() {
               {exporting ? 'Preparing...' : '⬇ Download Excel'}
             </button>
           </div>
+          {translateWarning && (
+            <div style={{ fontSize: 13, color: 'var(--late)', marginTop: 10 }}>{translateWarning}</div>
+          )}
         </div>
 
         {loading ? <div className="card">Loading...</div> : isDaily ? (
