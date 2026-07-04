@@ -18,6 +18,12 @@ function rangeStart(period) {
   return d.toISOString().slice(0, 10);
 }
 
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+const PERIODS = ['daily', 'weekly', 'monthly', 'half_yearly', 'yearly', 'custom'];
+
 function delayBadge(minutes) {
   if (minutes === 0) return { text: 'On Time', cls: 'badge-ontime' };
   if (minutes > 0) return { text: `${minutes} min Late`, cls: 'badge-late' };
@@ -95,28 +101,43 @@ function AdminEditableRow({ row, onSaved }) {
 export default function ReportsPage() {
   const { profile } = useProfile();
   const [period, setPeriod] = useState('daily');
+  const [customFrom, setCustomFrom] = useState(rangeStart('weekly'));
+  const [customTo, setCustomTo] = useState(todayStr());
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [translateWarning, setTranslateWarning] = useState('');
 
+  const isCustom = period === 'custom';
+  const customRangeInvalid = isCustom && (!customFrom || !customTo || customFrom > customTo);
+
   useEffect(() => {
+    if (customRangeInvalid) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
     async function load() {
       setLoading(true);
-      const from = rangeStart(period);
-      const { data } = await supabase
+      const from = isCustom ? customFrom : rangeStart(period);
+      let query = supabase
         .from('entries')
         .select('id, entry_date, schedule_page_time, release_page_time, delay_minutes, last_page_no, delay_reason, editions(name, branch, pullout, states(name))')
         .gte('entry_date', from)
         .order('entry_date', { ascending: false });
+      if (isCustom) query = query.lte('entry_date', customTo);
+      const { data } = await query;
       setRows(data || []);
       setLoading(false);
     }
     load();
-  }, [period, refreshTick]);
+  }, [period, customFrom, customTo, refreshTick]);
 
+  // "daily" and "custom" both show the full row-by-row detail table (with admin
+  // corrections); the fixed periods (weekly/monthly/etc.) show averaged summaries.
   const isDaily = period === 'daily';
+  const isDetail = isDaily || isCustom;
 
   const grouped = {};
   rows.forEach(r => {
@@ -151,7 +172,7 @@ export default function ReportsPage() {
     setExporting(true);
     setTranslateWarning('');
     try {
-      if (isDaily) {
+      if (isDetail) {
         let failCount = 0;
         const rowsWithTranslatedReasons = await Promise.all(
           rows.map(async (r) => {
@@ -172,9 +193,12 @@ export default function ReportsPage() {
         if (failCount > 0) {
           setTranslateWarning(`Note: ${failCount} reason(s) could not be translated and were kept in the original language.`);
         }
+        const filenameSuffix = isCustom
+          ? `custom-${customFrom}_to_${customTo}`
+          : `daily-${new Date().toISOString().slice(0,10)}`;
         await exportStyledExcel({
-          filename: `edition-report-daily-${new Date().toISOString().slice(0,10)}.xlsx`,
-          sheetName: 'Daily Report',
+          filename: `edition-report-${filenameSuffix}.xlsx`,
+          sheetName: isCustom ? 'Custom Report' : 'Daily Report',
           delayKey: 'delay_minutes',
           columns: [
             { header: 'State', key: 'state', width: 14 },
@@ -215,34 +239,70 @@ export default function ReportsPage() {
         <div className="card">
           <h2>{profile?.role === 'edition_incharge' ? 'My Reports' : 'Reports (Director-Ready)'}</h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            {['daily','weekly','monthly','half_yearly','yearly'].map(p => (
+            {PERIODS.map(p => (
               <button
                 key={p}
                 type="button"
                 className={p === period ? '' : 'secondary'}
                 onClick={() => setPeriod(p)}
               >
-                {p.replace('_', ' ')}
+                {p === 'custom' ? 'custom date' : p.replace('_', ' ')}
               </button>
             ))}
             <button
               type="button"
               className="gold"
               onClick={handleDownload}
-              disabled={exporting || (isDaily ? rows.length === 0 : avgRows.length === 0)}
+              disabled={exporting || customRangeInvalid || (isDetail ? rows.length === 0 : avgRows.length === 0)}
               style={{ marginLeft: 'auto' }}
             >
               {exporting ? 'Preparing...' : '⬇ Download Excel'}
             </button>
           </div>
+
+          {isCustom && (
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', marginTop: 12 }}>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                From
+                <input
+                  type="date"
+                  value={customFrom}
+                  max={customTo || undefined}
+                  onChange={e => setCustomFrom(e.target.value)}
+                />
+              </label>
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                To
+                <input
+                  type="date"
+                  value={customTo}
+                  min={customFrom || undefined}
+                  max={todayStr()}
+                  onChange={e => setCustomTo(e.target.value)}
+                />
+              </label>
+              {customRangeInvalid && (
+                <span style={{ color: 'var(--late)', fontSize: 13 }}>
+                  Please select a valid "from" and "to" date (from must not be after to).
+                </span>
+              )}
+            </div>
+          )}
+
           {translateWarning && (
             <div style={{ fontSize: 13, color: 'var(--late)', marginTop: 10 }}>{translateWarning}</div>
           )}
         </div>
 
-        {loading ? <div className="card">Loading...</div> : isDaily ? (
+        {loading ? <div className="card">Loading...</div> : customRangeInvalid ? (
+          <div className="card">Please pick a valid custom date range above.</div>
+        ) : isDetail ? (
           <div className="card" style={{ overflowX: 'auto' }}>
-            <h3>Today's Detail (Which Edition Was Late/Early, and Why)</h3>
+            <h3>
+              {isDaily
+                ? "Today's Detail (Which Edition Was Late/Early, and Why)"
+                : `Detail from ${customFrom} to ${customTo} (Which Edition Was Late/Early, and Why)`}
+            </h3>
             {rows.length === 0 ? <p>No entries yet for this period.</p> : (
               <table>
                 <thead>
