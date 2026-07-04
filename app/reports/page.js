@@ -52,6 +52,7 @@ function AdminEditableRow({ row, onSaved }) {
   const [reason, setReason] = useState(row.delay_reason || '');
   const [lastPage, setLastPage] = useState(row.last_page_no || '');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [err, setErr] = useState('');
 
   const scheduleTime = row.schedule_page_time?.slice(0, 5);
@@ -67,6 +68,19 @@ function AdminEditableRow({ row, onSaved }) {
       delay_reason: reason,
     }).eq('id', row.id);
     setSaving(false);
+    if (error) { setErr(error.message); return; }
+    onSaved();
+  }
+
+  async function handleDelete() {
+    const label = `${row.editions?.name || ''} - ${row.editions?.pullout || 'MAIN'} (${row.entry_date})`;
+    if (!window.confirm(`Delete this entry?\n\n${label}\n\nThe Edition Incharge will be able to submit this date again. This cannot be undone.`)) {
+      return;
+    }
+    setErr('');
+    setDeleting(true);
+    const { error } = await supabase.from('entries').delete().eq('id', row.id);
+    setDeleting(false);
     if (error) { setErr(error.message); return; }
     onSaved();
   }
@@ -89,9 +103,20 @@ function AdminEditableRow({ row, onSaved }) {
       </td>
       <td><input type="text" value={lastPage} onChange={e => setLastPage(e.target.value)} style={{ minWidth: 90 }} /></td>
       <td>
-        <button type="button" onClick={handleSave} disabled={saving} style={{ marginTop: 0, padding: '6px 14px', fontSize: 13 }}>
-          {saving ? '...' : 'Update'}
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button type="button" onClick={handleSave} disabled={saving || deleting} style={{ marginTop: 0, padding: '6px 14px', fontSize: 13 }}>
+            {saving ? '...' : 'Update'}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleDelete}
+            disabled={saving || deleting}
+            style={{ marginTop: 0, padding: '6px 14px', fontSize: 13, color: 'var(--late)', borderColor: 'var(--late)' }}
+          >
+            {deleting ? '...' : 'Delete'}
+          </button>
+        </div>
         {err && <div className="error" style={{ fontSize: 11 }}>{err}</div>}
       </td>
     </tr>
