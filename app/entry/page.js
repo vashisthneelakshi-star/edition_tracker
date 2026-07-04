@@ -49,6 +49,22 @@ function formatDisplayDate(isoDate) {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
+// Calendar-based (not cycle-shifted) Yesterday / Today / Tomorrow options —
+// the Incharge is allowed to pick any of these three for the entry.
+function getDateOffset(offsetDays) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+
+function buildDateOptions() {
+  return [
+    { value: getDateOffset(-1), label: 'Yesterday' },
+    { value: getDateOffset(0), label: 'Today' },
+    { value: getDateOffset(1), label: 'Tomorrow' },
+  ];
+}
+
 // Shared logic for one edition's entry (used by both table row and mobile card)
 function useEntryRow(edition, entryDate, existingEntry, onSaved) {
   const [releaseTime, setReleaseTime] = useState(existingEntry?.release_page_time?.slice(0, 5) || '');
@@ -206,7 +222,13 @@ export default function EntryPage() {
 
   const [editions, setEditions] = useState([]);
   const [scopes, setScopes] = useState([]);
-  const [entryDate] = useState(getCurrentCycleDate());
+  const dateOptions = useState(buildDateOptions)[0];
+  const [entryDate, setEntryDate] = useState(() => {
+    const cycleDate = getCurrentCycleDate();
+    // Default to the auto-computed cycle date if it falls within the allowed
+    // Yesterday/Today/Tomorrow window, otherwise fall back to Today.
+    return dateOptions.some(o => o.value === cycleDate) ? cycleDate : dateOptions[1].value;
+  });
   const [existingEntries, setExistingEntries] = useState({});
   const [dataLoading, setDataLoading] = useState(true);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -289,11 +311,21 @@ export default function EntryPage() {
             ))}
           </div>
           <label>Date</label>
-          <div className="locked-field" style={{ padding: '11px 12px', borderRadius: 8, maxWidth: 200, fontWeight: 700 }}>
-            {formatDisplayDate(entryDate)}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {dateOptions.map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                className={opt.value === entryDate ? '' : 'secondary'}
+                onClick={() => setEntryDate(opt.value)}
+                style={{ marginTop: 0 }}
+              >
+                {opt.label} <span style={{ opacity: 0.75, fontWeight: 400 }}>({formatDisplayDate(opt.value)})</span>
+              </button>
+            ))}
           </div>
           <div className="locked-note" style={{ marginTop: 12, background: 'var(--ontime-bg)', color: 'var(--ontime)', fontWeight: 600 }}>
-            ⓘ You will not be able to fill this after {String(CUTOFF_HOUR).padStart(2,'0')}:00 AM the next day.
+            ⓘ You can fill entries for Yesterday, Today, or Tomorrow only. Once submitted for a date, it locks — contact your Admin for corrections.
           </div>
         </div>
 
