@@ -26,9 +26,19 @@ function delayBadge(minutes) {
 
 function calcDelayMinutes(scheduleTime, releaseTime) {
   if (!scheduleTime || !releaseTime) return null;
-  const [sh, sm] = scheduleTime.split(':').map(Number);
-  const [rh, rm] = releaseTime.split(':').map(Number);
-  return (rh * 60 + rm) - (sh * 60 + sm);
+
+  const [sh, sm] = scheduleTime.split(":").map(Number);
+  const [rh, rm] = releaseTime.split(":").map(Number);
+
+  let scheduleMinutes = sh * 60 + sm;
+  let releaseMinutes = rh * 60 + rm;
+
+  // Midnight crossover
+  if (scheduleMinutes < 360 && releaseMinutes >= 1080) {
+    scheduleMinutes += 1440;
+  }
+
+  return releaseMinutes - scheduleMinutes;
 }
 
 function AdminEditableRow({ row, onSaved }) {
