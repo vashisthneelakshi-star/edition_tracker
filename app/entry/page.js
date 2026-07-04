@@ -16,9 +16,19 @@ function wordCount(str) {
 
 function calcDelay(scheduleTime, releaseTime) {
   if (!scheduleTime || !releaseTime) return null;
-  const [sh, sm] = scheduleTime.split(':').map(Number);
-  const [rh, rm] = releaseTime.split(':').map(Number);
-  return (rh * 60 + rm) - (sh * 60 + sm);
+
+  const [sh, sm] = scheduleTime.split(":").map(Number);
+  const [rh, rm] = releaseTime.split(":").map(Number);
+
+  let schedule = sh * 60 + sm;
+  let release = rh * 60 + rm;
+
+  // Midnight crossover
+  if (schedule < 360 && release >= 1080) {
+    schedule += 1440;
+  }
+
+  return release - schedule;
 }
 
 // A "cycle" covers one newspaper date. Since most page-release times fall
