@@ -80,8 +80,22 @@ function AdminEditableRow({ row, onSaved }) {
     setErr('');
     setDeleting(true);
     const { error } = await supabase.from('entries').delete().eq('id', row.id);
+    if (error) { setDeleting(false); setErr(error.message); return; }
+
+    // Reopen this (state, branch, date) so the Edition Incharge sees it as
+    // selectable again on their Entry page, even though its normal 4 AM
+    // window has already closed.
+    if (row.editions?.state_id && row.editions?.branch) {
+      const { data: { session } } = await supabase.auth.getSession();
+      await supabase.from('date_overrides').upsert({
+        state_id: row.editions.state_id,
+        branch: row.editions.branch,
+        entry_date: row.entry_date,
+        opened_by: session?.user?.id,
+      }, { onConflict: 'state_id,branch,entry_date' });
+    }
+
     setDeleting(false);
-    if (error) { setErr(error.message); return; }
     onSaved();
   }
 
@@ -123,6 +137,111 @@ function AdminEditableRow({ row, onSaved }) {
   );
 }
 
+function AdminReopenPanel() {
+  const [states, setStates] = useState([]);
+  const [branches, setBranches] = useState([]);
+  const [stateId, setStateId] = useState('');
+  const [branch, setBranch] = useState('');
+  const [date, setDate] = useState(todayStr());
+  const [overrides, setOverrides] = useState([]);
+  const [err, setErr] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [loadingOverrides, setLoadingOverrides] = useState(true);
+
+  async function loadOverrides() {
+    setLoadingOverrides(true);
+    const { data } = await supabase
+      .from('date_overrides')
+      .select('id, branch, entry_date, created_at, states(name)')
+      .order('created_at', { ascending: false });
+    setOverrides(data || []);
+    setLoadingOverrides(false);
+  }
+
+  useEffect(() => {
+    supabase.from('states').select('*').order('name').then(({ data }) => setStates(data || []));
+    loadOverrides();
+  }, []);
+
+  useEffect(() => {
+    if (!stateId) { setBranches([]); setBranch(''); return; }
+    supabase.from('editions').select('branch').eq('state_id', stateId).then(({ data }) => {
+      const uniq = [...new Set((data || []).map(e => e.branch).filter(Boolean))];
+      setBranches(uniq);
+      setBranch(uniq[0] || '');
+    });
+  }, [stateId]);
+
+  async function handleOpen(e) {
+    e.preventDefault();
+    setErr('');
+    if (!stateId || !branch || !date) { setErr('Select State, Branch and Date'); return; }
+    setSaving(true);
+    const { error } = await supabase.from('date_overrides').upsert({
+      state_id: stateId,
+      branch,
+      entry_date: date,
+    }, { onConflict: 'state_id,branch,entry_date' });
+    setSaving(false);
+    if (error) { setErr(error.message); return; }
+    loadOverrides();
+  }
+
+  async function handleClose(id) {
+    if (!window.confirm('Close this reopened date? The Incharge will no longer be able to select it.')) return;
+    await supabase.from('date_overrides').delete().eq('id', id);
+    loadOverrides();
+  }
+
+  return (
+    <div className="card">
+      <h2>Reopen a Past Date</h2>
+      <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: -6 }}>
+        Lets an Edition Incharge submit an entry for a date whose 4 AM window has already closed.
+      </p>
+      <form onSubmit={handleOpen} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div>
+          <label>State</label>
+          <select value={stateId} onChange={e => setStateId(e.target.value)} required>
+            <option value="">Select State</option>
+            {states.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label>Branch</label>
+          <select value={branch} onChange={e => setBranch(e.target.value)} required disabled={!stateId}>
+            <option value="">Select Branch</option>
+            {branches.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
+        </div>
+        <div>
+          <label>Date</label>
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
+        </div>
+        <button type="submit" disabled={saving}>{saving ? 'Opening...' : 'Open Date'}</button>
+      </form>
+      {err && <div className="error">{err}</div>}
+
+      {!loadingOverrides && overrides.length > 0 && (
+        <table style={{ marginTop: 16 }}>
+          <thead><tr><th>State</th><th>Branch</th><th>Date</th><th>Opened</th><th></th></tr></thead>
+          <tbody>
+            {overrides.map(o => (
+              <tr key={o.id}>
+                <td>{o.states?.name}</td>
+                <td>{o.branch}</td>
+                <td>{o.entry_date}</td>
+                <td>{new Date(o.created_at).toLocaleString('en-GB')}</td>
+                <td><a href="#" onClick={(e) => { e.preventDefault(); handleClose(o.id); }}>Close</a></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 export default function ReportsPage() {
   const { profile } = useProfile();
   const [period, setPeriod] = useState('daily');
@@ -148,7 +267,7 @@ export default function ReportsPage() {
       const from = isCustom ? customFrom : rangeStart(period);
       let query = supabase
         .from('entries')
-        .select('id, entry_date, schedule_page_time, release_page_time, delay_minutes, last_page_no, delay_reason, editions(name, branch, pullout, states(name))')
+        .select('id, entry_date, schedule_page_time, release_page_time, delay_minutes, last_page_no, delay_reason, editions(name, branch, pullout, state_id, states(name))')
         .gte('entry_date', from)
         .order('entry_date', { ascending: false });
       if (isCustom) query = query.lte('entry_date', customTo);
@@ -261,6 +380,7 @@ export default function ReportsPage() {
   return (
     <AppShell profile={profile}>
       <div className="container" style={{ maxWidth: '100%', padding: '24px 16px' }}>
+        {profile?.role === 'admin' && <AdminReopenPanel />}
         <div className="card">
           <h2>{profile?.role === 'edition_incharge' ? 'My Reports' : 'Reports (Director-Ready)'}</h2>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
