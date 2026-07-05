@@ -8,7 +8,7 @@ import TimeSelect from '../components/TimeSelect';
 import ReasonField from '../components/ReasonField';
 
 const WORD_LIMIT = 100;
-const CUTOFF_HOUR = 4; // after 4:00 AM, the previous cycle's date is no longer editable
+const CUTOFF_HOUR = 4; // at 4:00 AM, the active cycle date rolls forward to the next day
 
 function wordCount(str) {
   return str.trim().split(/\s+/).filter(Boolean).length;
@@ -31,44 +31,23 @@ function calcDelay(scheduleTime, releaseTime) {
   return release - schedule;
 }
 
-// A "cycle" covers one newspaper date. Since most page-release times fall
-// between late night and ~4 AM the next calendar day, entries made before
-// 4 AM still belong to the PREVIOUS calendar day's cycle.
-function getCurrentCycleDate() {
+// A "cycle" covers one newspaper date. Work done TODAY is for TOMORROW's
+// printed edition. Before 4 AM, the still-open window belongs to TODAY's
+// date (it opened yesterday during the day). From 4 AM onward, a new window
+// opens for TOMORROW's date — that is the single "active cycle date".
+function getActiveCycleDate() {
   const now = new Date();
   if (now.getHours() < CUTOFF_HOUR) {
-    const yesterday = new Date(now);
-    yesterday.setDate(now.getDate() - 1);
-    return yesterday.toISOString().slice(0, 10);
+    return now.toISOString().slice(0, 10);
   }
-  return now.toISOString().slice(0, 10);
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  return tomorrow.toISOString().slice(0, 10);
 }
 
 function formatDisplayDate(isoDate) {
   const d = new Date(isoDate + 'T00:00:00');
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-}
-
-// Calendar-based (not cycle-shifted) Yesterday / Today / Tomorrow options —
-// the Incharge is allowed to pick any of these three for the entry.
-function getDateOffset(offsetDays) {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
-}
-
-function buildDateOptions() {
-  const opts = [
-    { value: getDateOffset(0), label: 'Today' },
-    { value: getDateOffset(1), label: 'Tomorrow' },
-  ];
-  // "Yesterday" is only a valid option before the 4 AM cutoff — the night
-  // work (midnight to 4 AM) still belongs to yesterday's edition date. Once
-  // 4 AM passes, yesterday's window is closed and must not be enterable.
-  if (new Date().getHours() < CUTOFF_HOUR) {
-    opts.unshift({ value: getDateOffset(-1), label: 'Yesterday' });
-  }
-  return opts;
 }
 
 // Shared logic for one edition's entry (used by both table row and mobile card)
@@ -228,34 +207,37 @@ export default function EntryPage() {
 
   const [editions, setEditions] = useState([]);
   const [scopes, setScopes] = useState([]);
-  const [dateOptions, setDateOptions] = useState(buildDateOptions);
-  const [entryDate, setEntryDate] = useState(() => {
-    const cycleDate = getCurrentCycleDate();
-    const opts = buildDateOptions();
-    // Default to the auto-computed cycle date if it falls within the allowed
-    // window, otherwise fall back to Today.
-    return opts.some(o => o.value === cycleDate)
-      ? cycleDate
-      : opts.find(o => o.label === 'Today').value;
-  });
+  const [activeCycleDate, setActiveCycleDate] = useState(getActiveCycleDate);
+  const [overrides, setOverrides] = useState([]); // dates an Admin has manually reopened
+  const [entryDate, setEntryDate] = useState(getActiveCycleDate);
   const [existingEntries, setExistingEntries] = useState({});
   const [dataLoading, setDataLoading] = useState(true);
   const [refreshTick, setRefreshTick] = useState(0);
 
-  // Re-check the allowed date window periodically (every 60s) so that if the
-  // page stays open across the 4 AM cutoff, "Yesterday" disappears and any
-  // currently-selected-but-now-invalid date is bumped forward to Today.
+  // Combined list of dates the incharge is allowed to enter right now:
+  // the single active cycle date, plus any dates Admin has reopened.
+  const dateOptions = [
+    { value: activeCycleDate, label: 'Current Edition' },
+    ...overrides
+      .filter(d => d !== activeCycleDate)
+      .sort()
+      .map(d => ({ value: d, label: 'Reopened by Admin' })),
+  ];
+
+  // Re-check the active cycle date periodically (every 60s) so that if the
+  // page stays open across the 4 AM cutoff, the date rolls forward
+  // automatically and any now-invalid selection is bumped to the new date.
   useEffect(() => {
     const id = setInterval(() => {
-      const opts = buildDateOptions();
-      setDateOptions(opts);
+      const fresh = getActiveCycleDate();
+      setActiveCycleDate(fresh);
       setEntryDate(current => {
-        if (opts.some(o => o.value === current)) return current;
-        return opts.find(o => o.label === 'Today').value;
+        const stillValid = current === fresh || overrides.includes(current);
+        return stillValid ? current : fresh;
       });
     }, 60000);
     return () => clearInterval(id);
-  }, []);
+  }, [overrides]);
 
   useEffect(() => {
     if (loading) return;
@@ -294,6 +276,19 @@ export default function EntryPage() {
       );
       const eds = results.flatMap(r => r.data || []);
       setEditions(eds);
+
+      // Fetch any dates Admin has reopened for this incharge's scopes
+      const overrideResults = await Promise.all(
+        myScopes.map(s =>
+          supabase
+            .from('date_overrides')
+            .select('entry_date')
+            .eq('state_id', s.state_id)
+            .eq('branch', s.branch)
+        )
+      );
+      const overrideDates = [...new Set(overrideResults.flatMap(r => (r.data || []).map(o => o.entry_date)))];
+      setOverrides(overrideDates);
 
       const { data: entries } = await supabase
         .from('entries')
@@ -335,21 +330,27 @@ export default function EntryPage() {
             ))}
           </div>
           <label>Date</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {dateOptions.map(opt => (
-              <button
-                key={opt.value}
-                type="button"
-                className={opt.value === entryDate ? '' : 'secondary'}
-                onClick={() => setEntryDate(opt.value)}
-                style={{ marginTop: 0 }}
-              >
-                {opt.label} <span style={{ opacity: 0.75, fontWeight: 400 }}>({formatDisplayDate(opt.value)})</span>
-              </button>
-            ))}
-          </div>
+          {dateOptions.length === 1 ? (
+            <div className="locked-field" style={{ padding: '11px 12px', borderRadius: 8, maxWidth: 220, fontWeight: 700 }}>
+              {formatDisplayDate(entryDate)}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {dateOptions.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  className={opt.value === entryDate ? '' : 'secondary'}
+                  onClick={() => setEntryDate(opt.value)}
+                  style={{ marginTop: 0 }}
+                >
+                  {formatDisplayDate(opt.value)} <span style={{ opacity: 0.75, fontWeight: 400 }}>({opt.label})</span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="locked-note" style={{ marginTop: 12, background: 'var(--ontime-bg)', color: 'var(--ontime)', fontWeight: 600 }}>
-            ⓘ "Yesterday" is only available before 4:00 AM (late-night work still belongs to yesterday's edition). After 4:00 AM it disappears — please use Today or Tomorrow. Once submitted for a date, it locks — contact your Admin for corrections.
+            ⓘ Today's work is entered under {formatDisplayDate(activeCycleDate)}'s date. This closes at 4:00 AM and the date then moves forward automatically. Need an older date reopened? Ask your Admin.
           </div>
         </div>
 
