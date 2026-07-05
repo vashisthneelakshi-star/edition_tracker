@@ -101,6 +101,7 @@ function AdminEditableRow({ row, onSaved }) {
 
   return (
     <tr>
+      <td>{row.entry_date}</td>
       <td>{row.editions?.states?.name}</td>
       <td>{row.editions?.branch}</td>
       <td><strong>{row.editions?.name}</strong></td>
@@ -323,6 +324,7 @@ export default function ReportsPage() {
             const { translated, failed } = await translateReason(r.delay_reason);
             if (failed) failCount++;
             return {
+              date: r.entry_date,
               state: r.editions?.states?.name,
               delay_minutes: r.delay_minutes,
               branch: r.editions?.branch,
@@ -345,6 +347,7 @@ export default function ReportsPage() {
           sheetName: isCustom ? 'Custom Report' : 'Daily Report',
           delayKey: 'delay_minutes',
           columns: [
+            { header: 'Date', key: 'date', width: 14, align: 'center' },
             { header: 'State', key: 'state', width: 14 },
             { header: 'Delay', key: 'delay_minutes', width: 12, align: 'center' },
             { header: 'Branch', key: 'branch', width: 16 },
@@ -452,7 +455,7 @@ export default function ReportsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th>State</th><th>Branch</th><th>Edition</th><th>Pullout</th>
+                    <th>Date</th><th>State</th><th>Branch</th><th>Edition</th><th>Pullout</th>
                     <th>Schedule Time</th><th>Release Time</th><th>Delay/Early</th>
                     <th>Reason</th><th>Last Page</th>
                     {profile?.role === 'admin' && <th>Correction</th>}
@@ -468,6 +471,7 @@ export default function ReportsPage() {
                       const badge = delayBadge(r.delay_minutes);
                       return (
                         <tr key={i}>
+                          <td>{r.entry_date}</td>
                           <td>{r.editions?.states?.name}</td>
                           <td>{r.editions?.branch}</td>
                           <td><strong>{r.editions?.name}</strong></td>
