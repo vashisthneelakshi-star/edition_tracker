@@ -58,11 +58,17 @@ function getDateOffset(offsetDays) {
 }
 
 function buildDateOptions() {
-  return [
-    { value: getDateOffset(-1), label: 'Yesterday' },
+  const opts = [
     { value: getDateOffset(0), label: 'Today' },
     { value: getDateOffset(1), label: 'Tomorrow' },
   ];
+  // "Yesterday" is only a valid option before the 4 AM cutoff — the night
+  // work (midnight to 4 AM) still belongs to yesterday's edition date. Once
+  // 4 AM passes, yesterday's window is closed and must not be enterable.
+  if (new Date().getHours() < CUTOFF_HOUR) {
+    opts.unshift({ value: getDateOffset(-1), label: 'Yesterday' });
+  }
+  return opts;
 }
 
 // Shared logic for one edition's entry (used by both table row and mobile card)
@@ -222,16 +228,34 @@ export default function EntryPage() {
 
   const [editions, setEditions] = useState([]);
   const [scopes, setScopes] = useState([]);
-  const dateOptions = useState(buildDateOptions)[0];
+  const [dateOptions, setDateOptions] = useState(buildDateOptions);
   const [entryDate, setEntryDate] = useState(() => {
     const cycleDate = getCurrentCycleDate();
+    const opts = buildDateOptions();
     // Default to the auto-computed cycle date if it falls within the allowed
-    // Yesterday/Today/Tomorrow window, otherwise fall back to Today.
-    return dateOptions.some(o => o.value === cycleDate) ? cycleDate : dateOptions[1].value;
+    // window, otherwise fall back to Today.
+    return opts.some(o => o.value === cycleDate)
+      ? cycleDate
+      : opts.find(o => o.label === 'Today').value;
   });
   const [existingEntries, setExistingEntries] = useState({});
   const [dataLoading, setDataLoading] = useState(true);
   const [refreshTick, setRefreshTick] = useState(0);
+
+  // Re-check the allowed date window periodically (every 60s) so that if the
+  // page stays open across the 4 AM cutoff, "Yesterday" disappears and any
+  // currently-selected-but-now-invalid date is bumped forward to Today.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const opts = buildDateOptions();
+      setDateOptions(opts);
+      setEntryDate(current => {
+        if (opts.some(o => o.value === current)) return current;
+        return opts.find(o => o.label === 'Today').value;
+      });
+    }, 60000);
+    return () => clearInterval(id);
+  }, []);
 
   useEffect(() => {
     if (loading) return;
@@ -325,7 +349,7 @@ export default function EntryPage() {
             ))}
           </div>
           <div className="locked-note" style={{ marginTop: 12, background: 'var(--ontime-bg)', color: 'var(--ontime)', fontWeight: 600 }}>
-            ⓘ You can fill entries for Yesterday, Today, or Tomorrow only. Once submitted for a date, it locks — contact your Admin for corrections.
+            ⓘ "Yesterday" is only available before 4:00 AM (late-night work still belongs to yesterday's edition). After 4:00 AM it disappears — please use Today or Tomorrow. Once submitted for a date, it locks — contact your Admin for corrections.
           </div>
         </div>
 
