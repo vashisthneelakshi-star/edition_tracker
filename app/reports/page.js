@@ -23,6 +23,15 @@ function todayStr() {
   return toLocalISODate(new Date());
 }
 
+function formatDateTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString('en-GB', {
+    timeZone: 'Asia/Kolkata',
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true,
+  });
+}
+
 const PERIODS = ['daily', 'weekly', 'monthly', 'half_yearly', 'yearly', 'custom'];
 
 function delayBadge(minutes) {
@@ -118,6 +127,8 @@ function AdminEditableRow({ row, onSaved }) {
         />
       </td>
       <td><input type="text" value={lastPage} onChange={e => setLastPage(e.target.value)} style={{ minWidth: 90 }} /></td>
+      <td>{row.filled_by_name}</td>
+      <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(row.created_at)}</td>
       <td>
         <div style={{ display: 'flex', gap: 6 }}>
           <button type="button" onClick={handleSave} disabled={saving || deleting} style={{ marginTop: 0, padding: '6px 14px', fontSize: 13 }}>
@@ -269,12 +280,25 @@ export default function ReportsPage() {
       const from = isCustom ? customFrom : rangeStart(period);
       let query = supabase
         .from('entries')
-        .select('id, entry_date, schedule_page_time, release_page_time, delay_minutes, last_page_no, delay_reason, editions(name, branch, pullout, state_id, states(name))')
+        .select('id, entry_date, schedule_page_time, release_page_time, delay_minutes, last_page_no, delay_reason, created_by, created_at, editions(name, branch, pullout, state_id, states(name))')
         .gte('entry_date', from)
         .order('entry_date', { ascending: false });
       if (isCustom) query = query.lte('entry_date', customTo);
       const { data } = await query;
-      setRows(data || []);
+      const entriesData = data || [];
+
+      // Attach "who filled it" name by looking up profiles for the
+      // distinct created_by user ids on these entries.
+      const userIds = [...new Set(entriesData.map(r => r.created_by).filter(Boolean))];
+      let namesById = {};
+      if (userIds.length > 0) {
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, full_name')
+          .in('id', userIds);
+        namesById = Object.fromEntries((profilesData || []).map(p => [p.id, p.full_name]));
+      }
+      setRows(entriesData.map(r => ({ ...r, filled_by_name: namesById[r.created_by] || '—' })));
       setLoading(false);
     }
     load();
@@ -334,6 +358,8 @@ export default function ReportsPage() {
               schedule: r.schedule_page_time?.slice(0,5),
               release: r.release_page_time?.slice(0,5),
               reason: translated,
+              filled_by: r.filled_by_name,
+              filled_on: formatDateTime(r.created_at),
             };
           })
         );
@@ -357,6 +383,8 @@ export default function ReportsPage() {
             { header: 'Schedule Time', key: 'schedule', width: 14, align: 'center' },
             { header: 'Release Time', key: 'release', width: 14, align: 'center' },
             { header: 'Reason', key: 'reason', width: 40, wrap: true },
+            { header: 'Filled By', key: 'filled_by', width: 18 },
+            { header: 'Filled On', key: 'filled_on', width: 22 },
           ],
           rows: rowsWithTranslatedReasons,
         });
@@ -458,7 +486,7 @@ export default function ReportsPage() {
                   <tr>
                     <th>Date</th><th>State</th><th>Branch</th><th>Edition</th><th>Pullout</th>
                     <th>Schedule Time</th><th>Release Time</th><th>Delay/Early</th>
-                    <th>Reason</th><th>Last Page</th>
+                    <th>Reason</th><th>Last Page</th><th>Filled By</th><th>Filled On</th>
                     {profile?.role === 'admin' && <th>Correction</th>}
                   </tr>
                 </thead>
@@ -482,6 +510,8 @@ export default function ReportsPage() {
                           <td><span className={`badge ${badge.cls}`}>{badge.text}</span></td>
                           <td>{r.delay_reason}</td>
                           <td>{r.last_page_no}</td>
+                          <td>{r.filled_by_name}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(r.created_at)}</td>
                         </tr>
                       );
                     })
