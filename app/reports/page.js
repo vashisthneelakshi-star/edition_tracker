@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { useProfile } from '../../lib/useProfile';
 import { exportStyledExcel } from '../../lib/exportExcel';
+import { toLocalISODate } from '../../lib/dateUtils';
 import AppShell from '../components/AppShell';
 import TimeSelect from '../components/TimeSelect';
 import ReasonField from '../components/ReasonField';
@@ -10,16 +11,16 @@ import ReasonField from '../components/ReasonField';
 function rangeStart(period) {
   const now = new Date();
   const d = new Date(now);
-  if (period === 'daily') return now.toISOString().slice(0, 10);
+  if (period === 'daily') return toLocalISODate(now);
   if (period === 'weekly') d.setDate(now.getDate() - 7);
   if (period === 'monthly') d.setMonth(now.getMonth() - 1);
   if (period === 'half_yearly') d.setMonth(now.getMonth() - 6);
   if (period === 'yearly') d.setFullYear(now.getFullYear() - 1);
-  return d.toISOString().slice(0, 10);
+  return toLocalISODate(d);
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return toLocalISODate(new Date());
 }
 
 const PERIODS = ['daily', 'weekly', 'monthly', 'half_yearly', 'yearly', 'custom'];
@@ -341,7 +342,7 @@ export default function ReportsPage() {
         }
         const filenameSuffix = isCustom
           ? `custom-${customFrom}_to_${customTo}`
-          : `daily-${new Date().toISOString().slice(0,10)}`;
+          : `daily-${todayStr()}`;
         await exportStyledExcel({
           filename: `edition-report-${filenameSuffix}.xlsx`,
           sheetName: isCustom ? 'Custom Report' : 'Daily Report',
@@ -361,7 +362,7 @@ export default function ReportsPage() {
         });
       } else {
         await exportStyledExcel({
-          filename: `edition-report-${period}-${new Date().toISOString().slice(0,10)}.xlsx`,
+          filename: `edition-report-${period}-${todayStr()}.xlsx`,
           sheetName: `${period} Report`,
           delayKey: 'avg',
           columns: [
