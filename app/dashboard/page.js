@@ -3,11 +3,12 @@ import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { supabase } from '../../lib/supabaseClient';
 import { useProfile } from '../../lib/useProfile';
+import { toLocalISODate } from '../../lib/dateUtils';
 import AppShell from '../components/AppShell';
 
 export default function DashboardPage() {
   const { profile } = useProfile();
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => toLocalISODate(new Date()));
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
 
