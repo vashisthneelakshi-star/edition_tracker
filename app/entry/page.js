@@ -351,7 +351,7 @@ export default function EntryPage() {
             </div>
           )}
           <div className="locked-note" style={{ marginTop: 12, background: 'var(--ontime-bg)', color: 'var(--ontime)', fontWeight: 600 }}>
-            ⓘ Today's work is entered under {formatDisplayDate(activeCycleDate)}'s date. This closes at 4:00 AM and the date then moves forward automatically. Need an older date reopened? Ask your Admin.
+            ⓘ Today's work is entered under {formatDisplayDate(activeCycleDate)}'s date. This window closes at 4:00 AM on {formatDisplayDate(activeCycleDate)}, after which the date moves forward automatically. Need an older date reopened? Ask your Admin.
           </div>
         </div>
 
