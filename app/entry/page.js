@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../../lib/supabaseClient';
 import { useProfile } from '../../lib/useProfile';
+import { toLocalISODate } from '../../lib/dateUtils';
 import AppShell from '../components/AppShell';
 import TimeSelect from '../components/TimeSelect';
 import ReasonField from '../components/ReasonField';
@@ -38,11 +39,11 @@ function calcDelay(scheduleTime, releaseTime) {
 function getActiveCycleDate() {
   const now = new Date();
   if (now.getHours() < CUTOFF_HOUR) {
-    return now.toISOString().slice(0, 10);
+    return toLocalISODate(now);
   }
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
-  return tomorrow.toISOString().slice(0, 10);
+  return toLocalISODate(tomorrow);
 }
 
 function formatDisplayDate(isoDate) {
