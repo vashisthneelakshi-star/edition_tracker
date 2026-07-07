@@ -261,10 +261,15 @@ export default function ReportsPage() {
   const [customFrom, setCustomFrom] = useState(rangeStart('weekly'));
   const [customTo, setCustomTo] = useState(todayStr());
   const [rows, setRows] = useState([]);
+  const [allEditions, setAllEditions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
   const [translateWarning, setTranslateWarning] = useState('');
+
+  useEffect(() => {
+    supabase.from('editions').select('*, states(name)').eq('active', true).then(({ data }) => setAllEditions(data || []));
+  }, []);
 
   const isCustom = period === 'custom';
   const customRangeInvalid = isCustom && (!customFrom || !customTo || customFrom > customTo);
@@ -315,14 +320,41 @@ export default function ReportsPage() {
     if (!grouped[key]) grouped[key] = {
       state: r.editions?.states?.name, branch: r.editions?.branch,
       name: r.editions?.name, pullout: r.editions?.pullout,
-      count: 0, total: 0,
+      count: 0, lateSum: 0, lateCount: 0, earlySum: 0, earlyCount: 0,
     };
     grouped[key].count += 1;
-    grouped[key].total += r.delay_minutes;
+    if (r.delay_minutes > 0) { grouped[key].lateSum += r.delay_minutes; grouped[key].lateCount += 1; }
+    else if (r.delay_minutes < 0) { grouped[key].earlySum += Math.abs(r.delay_minutes); grouped[key].earlyCount += 1; }
   });
+  // Most-delayed editions first; on-time/early-only editions sink toward the bottom.
   const avgRows = Object.values(grouped).map(v => ({
-    ...v, avg: Math.round(v.total / v.count),
-  })).sort((a, b) => b.avg - a.avg);
+    ...v,
+    avgDelay: v.lateCount > 0 ? Math.round(v.lateSum / v.lateCount) : null,
+    avgEarly: v.earlyCount > 0 ? Math.round(v.earlySum / v.earlyCount) : null,
+  })).sort((a, b) => (b.avgDelay ?? -Infinity) - (a.avgDelay ?? -Infinity));
+
+  // Detail rows (daily/custom): most delayed at top, then on-time, then most
+  // early at the bottom — same ordering shown on screen and in the export.
+  const sortedRows = [...rows].sort((a, b) => b.delay_minutes - a.delay_minutes);
+
+  // "Not Filled" — which editions in scope have missing submissions for the
+  // selected period (used as an extra Excel sheet on every export type).
+  const periodFrom = isCustom ? customFrom : rangeStart(period);
+  const periodTo = isCustom ? customTo : todayStr();
+  function daysBetweenInclusive(fromStr, toStr) {
+    const f = new Date(fromStr + 'T00:00:00');
+    const t = new Date(toStr + 'T00:00:00');
+    return Math.round((t - f) / 86400000) + 1;
+  }
+  const expectedDays = (customRangeInvalid || !periodFrom || !periodTo) ? 0 : daysBetweenInclusive(periodFrom, periodTo);
+  const missingRows = allEditions.map(ed => {
+    const key = `${ed.states?.name}|${ed.branch}|${ed.name}|${ed.pullout}`;
+    const submitted = grouped[key]?.count || 0;
+    return {
+      state: ed.states?.name, branch: ed.branch, name: ed.name, pullout: ed.pullout,
+      submitted, expected: expectedDays, missing: Math.max(expectedDays - submitted, 0),
+    };
+  }).filter(r => r.missing > 0).sort((a, b) => b.missing - a.missing);
 
   async function translateReason(text) {
     if (!text || !text.trim()) return { translated: text || '', failed: false };
@@ -345,7 +377,7 @@ export default function ReportsPage() {
       if (isDetail) {
         let failCount = 0;
         const rowsWithTranslatedReasons = await Promise.all(
-          rows.map(async (r) => {
+          sortedRows.map(async (r) => {
             const { translated, failed } = await translateReason(r.delay_reason);
             if (failed) failCount++;
             return {
@@ -387,21 +419,45 @@ export default function ReportsPage() {
             { header: 'Filled On', key: 'filled_on', width: 22 },
           ],
           rows: rowsWithTranslatedReasons,
+          extraSheets: [{
+            sheetName: 'Not Filled',
+            columns: [
+              { header: 'State', key: 'state', width: 14 },
+              { header: 'Branch', key: 'branch', width: 16 },
+              { header: 'Edition', key: 'name', width: 22 },
+              { header: 'Pullout', key: 'pullout', width: 16 },
+              { header: 'Missed Days', key: 'missing', width: 14, align: 'center' },
+              { header: 'Expected Days', key: 'expected', width: 14, align: 'center' },
+            ],
+            rows: missingRows,
+          }],
         });
       } else {
         await exportStyledExcel({
           filename: `edition-report-${period}-${todayStr()}.xlsx`,
           sheetName: `${period} Report`,
-          delayKey: 'avg',
           columns: [
             { header: 'State', key: 'state', width: 14 },
             { header: 'Branch', key: 'branch', width: 16 },
             { header: 'Edition', key: 'name', width: 22 },
             { header: 'Pullout', key: 'pullout', width: 16 },
-            { header: 'Avg Delay (min)', key: 'avg', width: 16, align: 'center' },
+            { header: 'Avg Delay (min)', key: 'avgDelay', width: 16, align: 'center' },
+            { header: 'Avg Early (min)', key: 'avgEarly', width: 16, align: 'center' },
             { header: 'Entries', key: 'count', width: 10, align: 'center' },
           ],
           rows: avgRows,
+          extraSheets: [{
+            sheetName: 'Not Filled',
+            columns: [
+              { header: 'State', key: 'state', width: 14 },
+              { header: 'Branch', key: 'branch', width: 16 },
+              { header: 'Edition', key: 'name', width: 22 },
+              { header: 'Pullout', key: 'pullout', width: 16 },
+              { header: 'Missed Days', key: 'missing', width: 14, align: 'center' },
+              { header: 'Expected Days', key: 'expected', width: 14, align: 'center' },
+            ],
+            rows: missingRows,
+          }],
         });
       }
     } finally {
@@ -492,11 +548,11 @@ export default function ReportsPage() {
                 </thead>
                 <tbody>
                   {profile?.role === 'admin' ? (
-                    rows.map((r) => (
+                    sortedRows.map((r) => (
                       <AdminEditableRow key={r.id} row={r} onSaved={() => setRefreshTick(t => t + 1)} />
                     ))
                   ) : (
-                    rows.map((r, i) => {
+                    sortedRows.map((r, i) => {
                       const badge = delayBadge(r.delay_minutes);
                       return (
                         <tr key={i}>
@@ -528,7 +584,7 @@ export default function ReportsPage() {
                 <thead>
                   <tr>
                     <th>State</th><th>Branch</th><th>Edition</th><th>Pullout</th>
-                    <th>Avg Delay (min)</th><th>Entries</th>
+                    <th>Avg Delay (min)</th><th>Avg Early (min)</th><th>Entries</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -539,9 +595,14 @@ export default function ReportsPage() {
                       <td><strong>{r.name}</strong></td>
                       <td>{r.pullout}</td>
                       <td>
-                        <span className={`badge ${r.avg > 0 ? 'badge-late' : r.avg < 0 ? 'badge-early' : 'badge-ontime'}`}>
-                          {r.avg} min
-                        </span>
+                        {r.avgDelay !== null ? (
+                          <span className="badge badge-late">{r.avgDelay} min</span>
+                        ) : '—'}
+                      </td>
+                      <td>
+                        {r.avgEarly !== null ? (
+                          <span className="badge badge-early">{r.avgEarly} min</span>
+                        ) : '—'}
                       </td>
                       <td>{r.count}</td>
                     </tr>
