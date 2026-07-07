@@ -1,0 +1,324 @@
+// ============================================================================
+// THE DESK — CONTENT COMMAND
+// Prisma schema — drop into your existing Rajasthan Patrika Next.js+Supabase
+// project (same DB as Director's Command Center). Run:
+//   npx prisma migrate dev --name content_command
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// SHARED LOOKUPS (Master Data — configurable from Admin later)
+// ---------------------------------------------------------------------------
+
+enum PlanLevel {
+  HEADQUARTERS
+  STATE
+  EDITION
+  DISTRICT_HQ
+  SUPPLEMENTS
+  EDITORIAL_PAGE
+  RND_TEAM
+}
+
+enum Timeframe {
+  ANNUAL
+  MONTHLY
+  WEEKLY
+  DAILY
+}
+
+enum PlanStatus {
+  DRAFTING
+  IN_PROGRESS
+  PENDING_REVIEW
+  AWAITING_OPTIONS
+  SUBMITTED
+  APPROVED
+}
+
+enum EventStatus {
+  NOT_STARTED
+  PLANNING
+  CONFIRMED
+  RECURRING
+}
+
+enum CalendarStatus {
+  NOT_STARTED
+  IDEA_STAGE
+  PLANNED
+  ASSIGNED
+  COMPLETED
+}
+
+enum CampaignStatus {
+  PLANNING
+  ACTIVE
+  COMPLETED
+}
+
+enum DocStatus {
+  ACTIVE_TRACKING
+  IN_REVIEW
+  CLOSED_ACTION_TAKEN
+}
+
+enum Severity {
+  MINOR
+  MODERATE
+  MAJOR
+}
+
+enum ContactType {
+  STAFF
+  EXTERNAL
+}
+
+// ---------------------------------------------------------------------------
+// AUTH & ADMIN CONFIGURATION
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  STATE_HEAD
+  EDITOR
+  VIEWER
+}
+
+// Mirrors auth.users (Supabase Auth) — id must match the auth user's id.
+// A trigger (see supabase/auth-trigger.sql) auto-creates this row on signup.
+model Profile {
+  id        String   @id
+  fullName  String?  @map("full_name")
+  role      Role     @default(VIEWER)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("profiles")
+}
+
+// Every button/menu/status label used in the UI can be overridden here from
+// the Admin Panel without touching code. Keys are stable identifiers used in
+// components (e.g. "content_planning.title", "status.APPROVED").
+model UiLabel {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("ui_labels")
+}
+
+// 1. Content Planning ---------------------------------------------------------
+model ContentPlan {
+  id         String     @id @default(cuid())
+  timeframe  Timeframe
+  level      PlanLevel
+  title      String
+  owner      String
+  dueAt      DateTime   @map("due_at")
+  status     PlanStatus
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  @@index([dueAt])
+  @@index([level])
+  @@index([owner])
+  @@index([status])
+  @@index([timeframe])
+  @@map("content_plans")
+}
+
+// 2. Editorial Event Planning ---------------------------------------------------------
+model EventPlan {
+  id        String      @id @default(cuid())
+  timeframe Timeframe
+  level     PlanLevel
+  title     String
+  eventDate String      @map("event_date") // free text: exact date OR recurrence rule (e.g. "Every Monday, 10 AM")
+  status    EventStatus
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  @@map("event_plans")
+}
+
+// 3. Calendar Days & Observances ---------------------------------------------------------
+model CalendarDay {
+  id        String         @id @default(cuid())
+  obsDate   String         @map("obs_date") // "11 Jul" style; consider real Date once recurring years are modeled
+  occasion  String
+  angle     String
+  status    CalendarStatus
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  @@map("calendar_days")
+}
+
+// 4. Special Campaigns ---------------------------------------------------------
+model Campaign {
+  id        String         @id @default(cuid())
+  name      String
+  owner     String
+  startDate DateTime       @map("start_date")
+  endDate   DateTime       @map("end_date")
+  status    CampaignStatus
+  reach     String? // e.g. "4.2M digital impressions"
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  @@map("campaigns")
+}
+
+// 5. Duty & Beat Charts ---------------------------------------------------------
+model DutyRoster {
+  id        String   @id @default(cuid())
+  staffName String   @map("staff_name")
+  level     PlanLevel
+  beat      String
+  shift     String   // "06:00–14:00" etc.
+  dutyDay   String   @map("duty_day") // "Today" / "Tomorrow" / "This week"
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("duty_roster")
+}
+
+// 6. Important Documents ---------------------------------------------------------
+model ImportantDocument {
+  id        String    @id @default(cuid())
+  title     String
+  category  String    // "Scam" | "Prominent Figure" | ... — free text, admin-configurable list
+  docDate   DateTime  @map("doc_date")
+  tags      String[]
+  status    DocStatus
+  fileUrl   String?   @map("file_url") // Supabase Storage path
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@map("important_documents")
+}
+
+// 7. Archive ---------------------------------------------------------
+model ArchiveItem {
+  id        String   @id @default(cuid())
+  title     String
+  category  String
+  archDate  DateTime? @map("arch_date")
+  tags      String[]
+  fileUrl   String?  @map("file_url")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("archive_items")
+}
+
+// 8. Idea Bank ---------------------------------------------------------
+model Idea {
+  id        String   @id @default(cuid())
+  title     String
+  category  String
+  tags      String[]
+  submittedBy String? @map("submitted_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ideas")
+}
+
+// 9. Journalism Awards ---------------------------------------------------------
+model Award {
+  id        String   @id @default(cuid())
+  name      String
+  status    String   // "Entries open" | "Closed" | "Won" etc — admin-configurable
+  closeDate DateTime? @map("close_date")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("awards")
+}
+
+// 10. Resources ---------------------------------------------------------
+model Resource {
+  id          String   @id @default(cuid())
+  category    String
+  name        String
+  url         String
+  reliability String   // "High" | "Medium" | "Low"
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("resources")
+}
+
+// 11. Case Studies ---------------------------------------------------------
+model CaseStudy {
+  id        String   @id @default(cuid())
+  title     String
+  category  String
+  tags      String[]
+  body      String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("case_studies")
+}
+
+// 12. Messages & Instructions ---------------------------------------------------------
+model Message {
+  id        String   @id @default(cuid())
+  fromUser  String   @map("from_user")
+  toGroup   String   @map("to_group") // one of GROUPS — admin-configurable
+  text      String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("messages")
+}
+
+// 13. Blunders & Errors ---------------------------------------------------------
+model Blunder {
+  id          String   @id @default(cuid())
+  edition     String
+  desk        String
+  description String   @db.Text
+  severity    Severity
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("blunders")
+}
+
+// 14. Star of the Week ---------------------------------------------------------
+model StarOfWeek {
+  id        String   @id @default(cuid())
+  week      String   // "Week of 30 Jun" etc.
+  name      String
+  desk      String
+  reason    String   @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("stars_of_week")
+}
+
+// 15. Contact Directory ---------------------------------------------------------
+model Contact {
+  id        String      @id @default(cuid())
+  name      String
+  type      ContactType
+  role      String
+  phone     String?
+  email     String?
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  @@map("contacts")
+}
+
+// 16. Accounts / Relationship Mapping ---------------------------------------------------------
+model AccountMap {
+  id           String   @id @default(cuid())
+  staff        String
+  contact      String
+  org          String
+  relationship String   @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("account_maps")
+}
