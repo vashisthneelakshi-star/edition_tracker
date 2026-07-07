@@ -46,6 +46,15 @@ function getActiveCycleDate() {
   return toLocalISODate(tomorrow);
 }
 
+// The form is only open for daily submissions between 6:00 PM and 4:00 AM —
+// this stops incharges from filling entries earlier in the day without the
+// actual release having happened yet. Admin-reopened override dates are
+// exempt from this window (see date_overrides).
+function isDailyWindowOpen() {
+  const h = new Date().getHours();
+  return h >= 18 || h < CUTOFF_HOUR;
+}
+
 function formatDisplayDate(isoDate) {
   const d = new Date(isoDate + 'T00:00:00');
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -228,8 +237,12 @@ export default function EntryPage() {
   // Re-check the active cycle date periodically (every 60s) so that if the
   // page stays open across the 4 AM cutoff, the date rolls forward
   // automatically and any now-invalid selection is bumped to the new date.
+  // Also forces a re-render each minute so the 6 PM daily-window gate opens
+  // live without needing a page reload.
+  const [, setClockTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => {
+      setClockTick(t => t + 1);
       const fresh = getActiveCycleDate();
       setActiveCycleDate(fresh);
       setEntryDate(current => {
@@ -319,6 +332,10 @@ export default function EntryPage() {
     );
   }
 
+  // Admin-reopened dates always bypass the 6 PM–4 AM daily window.
+  const isOverrideSelected = overrides.includes(entryDate);
+  const formOpenForSelectedDate = isOverrideSelected || isDailyWindowOpen();
+
   return (
     <AppShell profile={profile}>
       <div className="container" style={{ maxWidth: '100%', padding: '24px 16px' }}>
@@ -351,12 +368,20 @@ export default function EntryPage() {
             </div>
           )}
           <div className="locked-note" style={{ marginTop: 12, background: 'var(--ontime-bg)', color: 'var(--ontime)', fontWeight: 600 }}>
-            ⓘ Today's work is entered under {formatDisplayDate(activeCycleDate)}'s date. This window closes at 4:00 AM on {formatDisplayDate(activeCycleDate)}, after which the date moves forward automatically. Need an older date reopened? Ask your Admin.
+            ⓘ Today's work is entered under {formatDisplayDate(activeCycleDate)}'s date. Entries can only be filled between 6:00 PM and 4:00 AM daily. This window closes at 4:00 AM on {formatDisplayDate(activeCycleDate)}, after which the date moves forward automatically. Need an older date reopened? Ask your Admin.
           </div>
         </div>
 
         {editions.length === 0 ? (
           <div className="card"><p>No editions found for your Branch. Please contact your Admin.</p></div>
+        ) : !formOpenForSelectedDate ? (
+          <div className="card">
+            <p style={{ fontWeight: 600, fontSize: 16, marginBottom: 4 }}>⏳ Entry form is closed right now</p>
+            <p style={{ color: 'var(--text-muted)' }}>
+              Entries can only be filled between 6:00 PM and 4:00 AM. It reopens today at 6:00 PM.
+              {overrides.length > 0 && ' If Admin has reopened an older date for you, select it above to fill it now.'}
+            </p>
+          </div>
         ) : (
           <>
             {/* Desktop: table layout */}
