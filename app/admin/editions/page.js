@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import Papa from 'papaparse';
 import { supabase } from '../../../lib/supabaseClient';
 import { useProfile } from '../../../lib/useProfile';
+import { exportStyledExcel } from '../../../lib/exportExcel';
 import AppShell from '../../components/AppShell';
 import TimeSelect from '../../components/TimeSelect';
 
@@ -168,6 +169,30 @@ export default function EditionsAdminPage() {
     URL.revokeObjectURL(url);
   }
 
+  async function downloadAllEditions() {
+    const rows = editions.map(ed => ({
+      state: ed.states?.name,
+      branch: ed.branch,
+      name: ed.name,
+      pullout: ed.pullout || 'MAIN',
+      schedule: ed.schedule_page_time?.slice(0, 5),
+      status: ed.active ? 'Active' : 'Inactive',
+    }));
+    await exportStyledExcel({
+      filename: `all-editions-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheetName: 'All Editions',
+      columns: [
+        { header: 'State', key: 'state', width: 14 },
+        { header: 'Branch', key: 'branch', width: 20 },
+        { header: 'Edition', key: 'name', width: 26 },
+        { header: 'Pullout', key: 'pullout', width: 20 },
+        { header: 'Schedule Time', key: 'schedule', width: 16, align: 'center' },
+        { header: 'Status', key: 'status', width: 12, align: 'center' },
+      ],
+      rows,
+    });
+  }
+
   return (
     <AppShell profile={profile}>
       <div className="container" style={{ maxWidth: 1000 }}>
@@ -241,7 +266,12 @@ export default function EditionsAdminPage() {
 
         {/* ---------- Editable list of all editions ---------- */}
         <div className="card">
-          <h3>All Editions ({editions.length}) — Editable Directly Below</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <h3 style={{ margin: 0 }}>All Editions ({editions.length}) — Editable Directly Below</h3>
+            <button type="button" onClick={downloadAllEditions} style={{ marginTop: 0 }}>
+              Download as Excel
+            </button>
+          </div>
           <div style={{ overflowX: 'auto' }}>
             <table>
               <thead><tr><th>State</th><th>Branch</th><th>Edition</th><th>Pullout</th><th>Schedule Time</th><th>Status</th><th></th></tr></thead>
