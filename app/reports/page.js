@@ -311,7 +311,13 @@ export default function ReportsPage() {
           .in('id', userIds);
         namesById = Object.fromEntries((profilesData || []).map(p => [p.id, p.full_name]));
       }
-      setRows(entriesData.map(r => ({ ...r, filled_by_name: namesById[r.created_by] || '—' })));
+      setRows(entriesData.map(r => ({
+        ...r,
+        filled_by_name: namesById[r.created_by] || '—',
+        // Always trust a fresh calculation from schedule/release times over
+        // the stored column, in case the stored value is ever stale.
+        delay_minutes: calcDelayMinutes(r.schedule_page_time?.slice(0, 5), r.release_page_time?.slice(0, 5)) ?? r.delay_minutes,
+      })));
       setLoading(false);
     }
     load();
