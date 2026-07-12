@@ -49,9 +49,17 @@ function calcDelayMinutes(scheduleTime, releaseTime) {
   let scheduleMinutes = sh * 60 + sm;
   let releaseMinutes = rh * 60 + rm;
 
-  // Midnight crossover
+  // Midnight crossover — schedule is early morning (e.g. 00:30) and release
+  // actually happened late the previous evening: treat schedule as next-day
+  // so an early release computes as negative (early), not ~23 hrs late.
   if (scheduleMinutes < 360 && releaseMinutes >= 1080) {
     scheduleMinutes += 1440;
+  }
+  // Midnight crossover — schedule is late evening (e.g. 23:00) and release
+  // happened just after midnight: treat release as next-day so a late
+  // release computes as positive (late), not ~23 hrs early.
+  else if (scheduleMinutes >= 1080 && releaseMinutes < 360) {
+    releaseMinutes += 1440;
   }
 
   return releaseMinutes - scheduleMinutes;
