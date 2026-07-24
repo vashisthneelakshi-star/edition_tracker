@@ -367,6 +367,7 @@ export default function ReportsPage() {
     return {
       state: ed.states?.name, branch: ed.branch, name: ed.name, pullout: ed.pullout,
       submitted, expected: expectedDays, missing: Math.max(expectedDays - submitted, 0),
+      schedule: ed.schedule_page_time?.slice(0, 5),
     };
   }).filter(r => r.missing > 0).sort((a, b) => b.missing - a.missing);
 
@@ -442,6 +443,7 @@ export default function ReportsPage() {
               { header: 'Pullout', key: 'pullout', width: 16 },
               { header: 'Missed Days', key: 'missing', width: 14, align: 'center' },
               { header: 'Expected Days', key: 'expected', width: 14, align: 'center' },
+              { header: 'Schedule Time', key: 'schedule', width: 14, align: 'center' },
             ],
             rows: missingRows,
           }],
@@ -469,6 +471,7 @@ export default function ReportsPage() {
               { header: 'Pullout', key: 'pullout', width: 16 },
               { header: 'Missed Days', key: 'missing', width: 14, align: 'center' },
               { header: 'Expected Days', key: 'expected', width: 14, align: 'center' },
+              { header: 'Schedule Time', key: 'schedule', width: 14, align: 'center' },
             ],
             rows: missingRows,
           }],
